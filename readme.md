@@ -1,6 +1,6 @@
 # Ridesk Server
 
-A Node.js/Express backend server for the Ridesk watersports school management platform, built with TypeScript, Supabase, and comprehensive API documentation.
+A Node.js/Express backend server for the Ridesk watersports school management platform, built with TypeScript, Supabase, and comprehensive API documentation
 
 ## 🚀 Features
 

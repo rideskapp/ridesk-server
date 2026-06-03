@@ -23,6 +23,10 @@ import {
 import { getPermissionsForRole } from "./permissions";
 import { env } from "../config/env";
 import emailService from "./email";
+import {
+  findAuthUserByEmail,
+  normalizeAuthEmail,
+} from "../utils/authUserLookup";
 
 // JWT configuration
 const JWT_SECRET = env.JWT_SECRET;
@@ -816,12 +820,14 @@ export const requestPasswordReset = async (
   email: string,
 ): Promise<{ success: boolean }> => {
   try {
-    const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers();
-    const userExists = authUsers?.users?.some((user) => user.email === email) ?? false;
+    const authUser = await findAuthUserByEmail(email);
 
-    if (!userExists) {
-      throw new NotFoundError("User with this email not found");
+    if (!authUser) {
+      throw new NotFoundError("User with this email");
     }
+
+    const normalizedEmail = normalizeAuthEmail(email);
+    const deliveryEmail = authUser.email ?? normalizedEmail;
 
     const otp = generateOTP();
     const hashedOTP = await hashPassword(otp);
@@ -832,14 +838,14 @@ export const requestPasswordReset = async (
     await supabaseAdmin
       .from("password_reset_otps")
       .update({ is_used: true })
-      .eq("email", email)
+      .eq("email", normalizedEmail)
       .eq("is_used", false);
 
     // Store the hashed OTP in database
     const { error: insertError } = await supabaseAdmin
       .from("password_reset_otps")
       .insert({
-        email,
+        email: normalizedEmail,
         otp: hashedOTP,
         expires_at: expiresAt.toISOString(),
         is_used: false,
@@ -853,7 +859,7 @@ export const requestPasswordReset = async (
     // Send OTP email (only if user exists)
     try {
      
-      await emailService.sendPasswordResetOTP(email, otp);
+      await emailService.sendPasswordResetOTP(deliveryEmail, otp);
     } catch (emailError: any) {
       
       throw new AppError("Failed to send password reset email", 500);
@@ -871,11 +877,13 @@ export const resetPasswordWithOTP = async (
   newPassword: string,
 ): Promise<{ success: boolean }> => {
   try {
+    const normalizedEmail = normalizeAuthEmail(email);
+
     // Get the most recent unused OTP for this email
     const { data: otpRecords, error: fetchError } = await supabaseAdmin
       .from("password_reset_otps")
       .select("*")
-      .eq("email", email)
+      .eq("email", normalizedEmail)
       .eq("is_used", false)
       .order("created_at", { ascending: false })
       .limit(1);
@@ -900,11 +908,10 @@ export const resetPasswordWithOTP = async (
       throw new AuthenticationError("Invalid or expired verification code");
     }
 
-    const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers();
-    const authUser = authUsers?.users?.find((user) => user.email === email);
+    const authUser = await findAuthUserByEmail(email);
 
     if (!authUser) {
-      throw new NotFoundError("User not found");
+      throw new NotFoundError("User");
     }
 
     // Update password in Supabase Auth

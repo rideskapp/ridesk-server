@@ -77,8 +77,8 @@ export const getReportingData = async (
         `
       )
       .eq("school_id", schoolId)
-      .gte("created_at", `${startDate}T00:00:00.000Z`)
-      .lte("created_at", `${endDate}T23:59:59.999Z`);
+      .lte("start_date", endDate)
+      .gte("end_date", startDate);
 
     if (bookingsError) {
       throw new AppError(`Failed to fetch bookings: ${bookingsError.message}`, 500);
@@ -282,6 +282,11 @@ export const getReportingData = async (
 
     bookingsList.forEach((booking: any) => {
       const bookingPrice = Number(booking.final_price ?? booking.products?.price ?? 0);
+      const outstanding = Math.min(
+        bookingPrice,
+        Math.max(0, Number(booking.outstanding_amount ?? bookingPrice)),
+      );
+      const paidPortion = bookingPrice - outstanding;
       const status = String(
         (booking.payment_status || "unpaid") as BookingPaymentStatus,
       ).toLowerCase();
@@ -289,16 +294,26 @@ export const getReportingData = async (
         case "paid":
           paidRevenue += bookingPrice;
           break;
+        case "partially_paid":
+          paidRevenue += paidPortion;
+          pendingRevenue += outstanding;
+          break;
         case "pending":
         case "unpaid":
-        case "partially_paid":
-          pendingRevenue += bookingPrice;
+          pendingRevenue += outstanding;
+          if (paidPortion > 0) {
+            paidRevenue += paidPortion;
+          }
           break;
         case "overdue":
-          overdueRevenue += bookingPrice;
+          paidRevenue += paidPortion;
+          overdueRevenue += outstanding;
           break;
         default:
-          pendingRevenue += bookingPrice;
+          pendingRevenue += outstanding;
+          if (paidPortion > 0) {
+            paidRevenue += paidPortion;
+          }
       }
     });
 
